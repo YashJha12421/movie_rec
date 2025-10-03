@@ -4,4 +4,4 @@ scikit-learn
 torch
 streamlit
 joblib
-sklearn.metrics.pairwise
+scikit-learn
