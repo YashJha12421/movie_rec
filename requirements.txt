@@ -1,8 +1,7 @@
 numpy
 pandas
 scikit-learn
-torch==2.2.0+cu118  # cu118 for CUDA if using GPU
--f https://download.pytorch.org/whl/torch_stable.html
+torch
 streamlit
 joblib
 sklearn.metrics.pairwise
