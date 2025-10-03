@@ -1,0 +1,9 @@
+numpy
+pandas
+scikit-learn
+flask
+gunicorn
+torch
+streamlit
+joblib
+sklearn.metrics.pairwise
