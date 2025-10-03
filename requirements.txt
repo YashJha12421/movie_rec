@@ -5,3 +5,6 @@ torch
 streamlit
 joblib
 scikit-learn
+re
+rapidfuzz
+pickle
