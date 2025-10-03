@@ -1,73 +1,74 @@
+# movie_rec_app.py
 import streamlit as st
 import torch
-import joblib
-import pandas as pd
+import torch.nn as nn
+import pickle
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
+from ncf_model import NCF
 
-# ---------------- Load assets ----------------
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# --------------------------
+# Load user/movie maps
+# --------------------------
+with open("user_map.pkl", "rb") as f:
+    user_map = pickle.load(f)
+with open("movie_map.pkl", "rb") as f:
+    movie_map = pickle.load(f)
 
-# Load CF model
-from ncf_model import NCF  # <- you’ll save your class into ncf_model.py
-num_users, num_movies = 100000, 20000  # replace with actual values
+num_users = len(user_map)
+num_movies = len(movie_map)
+
+# --------------------------
+# Load trained model
+# --------------------------
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = NCF(num_users, num_movies)
 model.load_state_dict(torch.load("ncf_model.pth", map_location=device))
-model.eval().to(device)
+model.to(device)
+model.eval()
 
-# Load utils
-user_map = joblib.load("user_map.pkl")
-movie_map = joblib.load("movie_map.pkl")
-movie_tfidf_idx = joblib.load("movie_tfidf_idx.pkl")
-tfidf = joblib.load("tfidf.pkl")
-movies = pd.read_csv("movies.csv")
-
-# ---------------- Helper ----------------
-def recommend_hybrid_from_titles(input_titles, top_n=10, cf_weight=0.7):
-    # Find closest movies (case-insensitive + fuzzy)
-    input_movies = []
-    for title in input_titles:
-        match = movies[movies["title"].str.lower().str.contains(title.lower(), na=False)]
-        if not match.empty:
-            input_movies.append(match.iloc[0]["movieId"])
-
-    if not input_movies:
+# --------------------------
+# Helper: recommend function
+# --------------------------
+def recommend(user_movies, top_n=10):
+    # Map input movies to IDs, ignore unknowns
+    input_ids = [movie_map[movie] for movie in user_movies if movie in movie_map]
+    if not input_ids:
         return []
 
-    # For each candidate movie, compute hybrid score
-    candidates = movies["movieId"].tolist()
-    results = []
-    for m in candidates:
-        # CF part
-        movie_tensor = torch.tensor([movie_map.get(m, 0)], dtype=torch.long).to(device)
-        user_tensor = torch.tensor([0], dtype=torch.long).to(device)  # dummy user
-        cf_score = model(user_tensor, movie_tensor).item()
+    # Compute scores for all movies
+    all_movie_ids = list(range(num_movies))
+    user_ids = torch.tensor([0]*num_movies).to(device)  # dummy user 0
+    movie_ids = torch.tensor(all_movie_ids).to(device)
 
-        # Content part
-        sims = []
-        for im in input_movies:
-            if im in movie_tfidf_idx and m in movie_tfidf_idx:
-                sims.append(
-                    cosine_similarity(
-                        tfidf.transform([movies.loc[movies.movieId==im, "genres"].values[0]]),
-                        tfidf.transform([movies.loc[movies.movieId==m, "genres"].values[0]])
-                    )[0,0]
-                )
-        content_score = np.mean(sims) if sims else 0
-        final_score = cf_weight*cf_score + (1-cf_weight)*content_score
-        results.append((m, final_score))
+    with torch.no_grad():
+        scores = model(user_ids, movie_ids).cpu().numpy()
 
-    recs = sorted(results, key=lambda x: -x[1])[:top_n]
-    return movies[movies["movieId"].isin([r[0] for r in recs])][["title"]].values.flatten()
+    # Remove movies already rated
+    for mid in input_ids:
+        scores[mid] = -np.inf
 
-# ---------------- Streamlit UI ----------------
-st.title("🎬 Hybrid Movie Recommender")
-st.write("Enter movies you like, and get hybrid recommendations!")
+    top_indices = np.argsort(-scores)[:top_n]
+    # Map back to movie names
+    inv_movie_map = {v: k for k, v in movie_map.items()}
+    recommendations = [inv_movie_map[i] for i in top_indices]
+    return recommendations
 
-input_text = st.text_area("Enter movies (comma separated):")
-if input_text:
-    titles = [t.strip() for t in input_text.split(",")]
-    recs = recommend_hybrid_from_titles(titles, top_n=10)
-    st.subheader("Recommended Movies:")
-    for r in recs:
-        st.write(r)
+# --------------------------
+# Streamlit UI
+# --------------------------
+st.title("Movie Recommendation App 🎬")
+
+user_input = st.text_area(
+    "Enter movies you liked (comma separated):",
+    "The Matrix (1999), Inception (2010)"
+)
+
+if st.button("Recommend"):
+    movies = [m.strip() for m in user_input.split(",")]
+    recs = recommend(movies)
+    if recs:
+        st.subheader("Top Recommendations:")
+        for i, r in enumerate(recs, 1):
+            st.write(f"{i}. {r}")
+    else:
+        st.write("No known movies found from your input.")
