@@ -11,7 +11,8 @@ import pickle
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # Load NCF or hybrid model
-model = torch.load("hybrid_diverse_model.pth", map_location=device)
+model = torch.load("ncf_model.pth", map_location=device)
+
 model.eval()
 
 # Load movie DataFrame
