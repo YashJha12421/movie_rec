@@ -65,42 +65,42 @@ def content_similarity(mid1, mid2):
 # -----------------------------
 # Recommendation function
 # -----------------------------
-def recommend_from_movies(input_movie_ids, top_n=10, top_k_ref=2, cf_weight=0.7, pop_penalty=True, candidate_k=100):
-    # Use input movies to create a "virtual user embedding"
-    movie_indices = [movie_map[m] for m in input_movie_ids if m in movie_map]
-    if not movie_indices:
-        return []
+def recommend_from_movies(user_input_ids, model, top_n=10, top_k_ref=2, cf_weight=0.7, device='cpu', pop_penalty=True, candidate_k=100):
+    """
+    user_input_ids: list of movie IDs that the user likes
+    model: pre-trained NCF model
+    """
+    model.eval()  # ensure model is in evaluation mode
+    all_movies = df['movieId'].unique()
     
-    with torch.no_grad():
-        item_embs = model.item_emb(torch.tensor(movie_indices).to(device))
-        virtual_user_emb = item_embs.mean(dim=0, keepdim=True)  # 1 x emb_size
-
-    # Candidate selection: all movies not in input
-    all_movies = set(df['movieId'].values)
-    candidates = [m for m in all_movies if m not in input_movie_ids and m in movie_map]
+    # Candidate selection: movies not in user input
+    candidates = [m for m in all_movies if m not in user_input_ids and m in movie_tfidf_idx]
+    
     if not candidates:
         return []
 
-    # CF score using virtual user
-    user_tensor = virtual_user_emb.expand(len(candidates), -1)  # repeat virtual embedding
-    movie_tensor = model.item_emb(torch.tensor([movie_map[m] for m in candidates]).to(device))
-    cf_scores = (user_tensor * movie_tensor).sum(dim=1).cpu().numpy()  # simple dot product
+    # Vectorized CF scoring
+    user_tensor = torch.tensor([0]*len(candidates), dtype=torch.long).to(device)  # dummy user id 0 for inference
+    movie_tensor = torch.tensor([movie_map[m] for m in candidates], dtype=torch.long).to(device)
+    
+    with torch.no_grad():
+        cf_scores = model(user_tensor, movie_tensor).detach().cpu().numpy()  # detach before converting
 
-    # Content scores
+    # Content-based scores
     content_scores = []
     for m in candidates:
-        sims = [content_similarity(inp, m) for inp in input_movie_ids if inp in movie_tfidf_idx]
+        sims = [content_similarity(um, m) for um in user_input_ids if um in movie_tfidf_idx]
         content_scores.append(np.mean(sims) if sims else 0)
     content_scores = np.array(content_scores)
 
     # Popularity penalty
     if pop_penalty:
         popularity = df.groupby('movieId').size().to_dict()
-        pop_scores = np.array([1 / (np.log(1 + popularity[m])) for m in candidates])
+        pop_scores = np.array([1 / (np.log(1 + popularity.get(m, 1))) for m in candidates])
     else:
         pop_scores = np.zeros(len(candidates))
 
-    # Hybrid score
+    # Weighted hybrid score
     hybrid_scores = cf_weight * cf_scores + (1 - cf_weight) * content_scores + 0.1 * pop_scores
 
     # Top-N selection
@@ -110,12 +110,15 @@ def recommend_from_movies(input_movie_ids, top_n=10, top_k_ref=2, cf_weight=0.7,
         movie_id = candidates[i]
         h_score = round(hybrid_scores[i], 3)
 
-        # Explanation: top similar input movies
-        sims = [(m, content_similarity(m, movie_id)) for m in input_movie_ids if m in movie_tfidf_idx]
-        sims.sort(key=lambda x: x[1], reverse=True)
-        top_refs = sims[:top_k_ref]
-        ref_strings = [f"{df[df['movieId']==m]['title'].values[0]} (sim={sim:.2f})" for m, sim in top_refs]
-        explanation = "Because you liked " + " and ".join(ref_strings) if ref_strings else "Recommended based on your preferences"
+        # Content-based explanation
+        if len(user_input_ids) > 0:
+            sims = [(m, content_similarity(m, movie_id)) for m in user_input_ids if m in movie_tfidf_idx]
+            sims.sort(key=lambda x: x[1], reverse=True)
+            top_refs = sims[:top_k_ref]
+            ref_strings = [f"{df[df['movieId']==m]['title'].values[0]} (sim={sim:.2f})" for m, sim in top_refs]
+            explanation = "Because you liked " + " and ".join(ref_strings)
+        else:
+            explanation = "Recommended based on your preferences"
 
         recommendations.append((df[df['movieId']==movie_id]['title'].values[0], explanation, h_score))
 
