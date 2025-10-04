@@ -129,19 +129,26 @@ def recommend_from_movies(user_input_ids, model, top_n=10, top_k_ref=2, cf_weigh
 # -----------------------------
 st.title("🎬 Hybrid Movie Recommender")
 
-user_input = st.text_area("Enter your favorite movies (comma-separated):", key="fav_movies")
+user_input = st.text_area("Enter your favorite movies (comma-separated):", key="movie_input")
 
 if st.button("Recommend"):
     if not user_input.strip():
         st.warning("Please enter at least one movie.")
     else:
+        # Split input and match to known movies
         input_movies = [m.strip() for m in user_input.split(",")]
         known_movie_ids = find_known_movies(input_movies, movie_title_map)
         
         if not known_movie_ids:
             st.warning("No known movies found from your input. Check spelling or try another movie.")
         else:
-            recommendations = recommend_from_movies(known_movie_ids, top_n=10)
+            # ✅ Pass model and device to your recommendation function
+            recommendations = recommend_from_movies(
+                known_movie_ids,
+                model=model,
+                top_n=10,
+                device=device
+            )
             
             st.success(f"Found {len(recommendations)} recommendations!")
             for title, reason, score in recommendations:
