@@ -64,40 +64,39 @@ def content_similarity(mid1, mid2):
 
 # -----------------------------
 # Recommendation function
-# -----------------------------
 def recommend_from_movies(input_movie_ids, model, top_n=10, top_k_ref=2, cf_weight=0.7, device='cpu', pop_penalty=True, candidate_k=50):
-    """
-    Recommend movies similar to input_movie_ids using your NCF model and content similarity.
-    """
     model.eval()
-    
-    # Get all movies
     all_movies = set(df['movieId'].unique())
-    
-    # Movies already in input
     rated_set = set(input_movie_ids)
-    
-    # 1️⃣ Candidate selection: top-K similar movies per input
     candidates = set()
+
+    # 1️⃣ Candidate selection
     for m in input_movie_ids:
-        if m not in movie_tfidf_idx:  # skip if no content embedding
-            continue
+        if m not in movie_tfidf_idx:
+            continue  # skip if no embeddings
         sims = [(mid, content_similarity(m, mid)) for mid in all_movies - rated_set if mid in movie_tfidf_idx]
         sims.sort(key=lambda x: x[1], reverse=True)
         candidates.update([mid for mid, _ in sims[:candidate_k]])
-    
-    candidates = list(candidates)
-    if not candidates:
-        return []
 
-    # 2️⃣ Compute CF scores
-    user_tensor = torch.tensor([0]*len(candidates), dtype=torch.long).to(device)  # dummy user idx, CF is per movie here
+    # If no candidates, fall back to top popular movies
+    if not candidates:
+        popularity = df.groupby('movieId').size().sort_values(ascending=False)
+        for mid in popularity.index:
+            if mid not in rated_set:
+                candidates.add(mid)
+            if len(candidates) >= top_n * 5:
+                break
+
+    candidates = list(candidates)
+
+    # 2️⃣ CF scoring
+    user_tensor = torch.tensor([0]*len(candidates), dtype=torch.long).to(device)
     movie_tensor = torch.tensor([movie_map[m] for m in candidates], dtype=torch.long).to(device)
     with torch.no_grad():
         cf_scores = model(user_tensor, movie_tensor).detach().cpu().numpy()
     cf_scores = (cf_scores - cf_scores.min()) / (cf_scores.max() - cf_scores.min() + 1e-8)
 
-    # 3️⃣ Compute content scores
+    # 3️⃣ Content scoring
     content_scores = []
     for m in candidates:
         sims = [content_similarity(m_input, m) for m_input in input_movie_ids if m_input in movie_tfidf_idx]
@@ -113,26 +112,23 @@ def recommend_from_movies(input_movie_ids, model, top_n=10, top_k_ref=2, cf_weig
     else:
         pop_scores = np.zeros(len(candidates))
 
-    # 5️⃣ Hybrid score
+    # 5️⃣ Hybrid scoring
     hybrid_scores = cf_weight * cf_scores + (1 - cf_weight) * content_scores + 0.1 * pop_scores
-
-    # 6️⃣ Pick top-N
     top_idx = np.argsort(-hybrid_scores)[:top_n]
+
     recommendations = []
     for i in top_idx:
         movie_id = candidates[i]
         h_score = round(hybrid_scores[i], 3)
-
-        # Explanation
         sims = [(m_input, content_similarity(m_input, movie_id)) for m_input in input_movie_ids if m_input in movie_tfidf_idx]
-        sims = [s for s in sims if s[1] > 0]  # only meaningful similarities
+        sims = [s for s in sims if s[1] > 0]
         sims.sort(key=lambda x: x[1], reverse=True)
         ref_strings = [f"{df[df['movieId']==m]['title'].values[0]} (sim={sim:.2f})" for m, sim in sims[:top_k_ref]]
         explanation = "Because you liked " + " and ".join(ref_strings) if ref_strings else "Recommended based on your preferences"
-
         recommendations.append((df[df['movieId']==movie_id]['title'].values[0], explanation, h_score))
 
     return recommendations
+
 
 # -----------------------------
 # Streamlit App
