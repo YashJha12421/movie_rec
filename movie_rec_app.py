@@ -5,7 +5,7 @@ from rapidfuzz import process, fuzz
 import torch
 import pickle
 from ncf_model import NCF
-
+import numpy as np
 # -----------------------------
 # Device setup
 # -----------------------------
