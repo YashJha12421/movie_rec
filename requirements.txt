@@ -5,6 +5,5 @@ torch
 streamlit
 joblib
 scikit-learn
-re
 rapidfuzz==3.2.2
 pickle
