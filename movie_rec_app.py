@@ -50,11 +50,16 @@ movie_title_map = {normalize_title(title): mid for mid, title in zip(df['movieId
 # -----------------------------
 # Fuzzy match input
 # -----------------------------
+from rapidfuzz import process, fuzz
+
 def find_known_movies(user_input_list, movie_title_map, threshold=60):
     matched_ids = []
     for inp in user_input_list:
         inp = inp.lower().strip()
-        best_match, score = process.extractOne(inp, movie_title_map.keys(), scorer=fuzz.token_sort_ratio)
+        # extractOne now returns (match, score, index) → ignore the index
+        best_match, score, _ = process.extractOne(
+            inp, movie_title_map.keys(), scorer=fuzz.token_sort_ratio
+        )
         if score >= threshold:
             matched_ids.append(movie_title_map[best_match])
     return matched_ids
