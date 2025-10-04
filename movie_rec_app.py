@@ -4,19 +4,36 @@ import re
 from rapidfuzz import process, fuzz
 import torch
 import pickle
+from ncf_model import NCF   # ✅ import your model class
 
 # -----------------------------
-# Load your model & mappings
+# Device setup
 # -----------------------------
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-# Load NCF or hybrid model
-model = torch.load("ncf_model.pth", map_location=device)
+# -----------------------------
+# Load mappings and data
+# -----------------------------
+with open("user_map.pkl", "rb") as f:
+    user_map = pickle.load(f)
+with open("movie_map.pkl", "rb") as f:
+    movie_map = pickle.load(f)
 
+num_users = len(user_map)
+num_items = len(movie_map)
+
+# -----------------------------
+# Load NCF model
+# -----------------------------
+model = NCF(num_users, num_items).to(device)
+model.load_state_dict(torch.load("ncf_model.pth", map_location=device))
 model.eval()
 
-# Load movie DataFrame
-df = pd.read_csv("movies.csv")  # or wherever your movies data is
+# -----------------------------
+# Load movies data
+# -----------------------------
+df = pd.read_csv("movies.csv")
+
 
 # Load saved user/movie maps if needed
 with open("movie_map.pkl", "rb") as f:
